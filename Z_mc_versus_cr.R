@@ -1,3 +1,6 @@
+##this is code that we can use to identify the effect size differneces before any attempt to control for DTF.
+##main question is about role of poly/dich and rasch/3pl
+
 list.files()->lf
 grep("y2001",lf)->i1
 grep("y2002",lf)->i2
