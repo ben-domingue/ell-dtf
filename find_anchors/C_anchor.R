@@ -1,3 +1,5 @@
+##not yet ready
+
 set.seed(10123010)
 fun<-function(x) {
     x[,1]->gr
