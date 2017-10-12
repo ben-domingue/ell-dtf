@@ -1,0 +1,262 @@
+---
+title: "dtf_ell"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(mirt)
+theme_set(theme_bw())
+```
+
+# Get data sorted
+
+```{r}
+# get Rdata file names
+main_frame <- data_frame(files = list.files("/Users/benstenhaug/Dropbox/pub")) %>% 
+  filter(files %>% str_detect(".Rdata"))
+
+# Load each and then save as rds in a different folder
+for(i in seq_along(main_frame$files)){
+  file <- main_frame$files[i]
+  load(paste0("/Users/benstenhaug/Dropbox/pub/", file))
+  saveRDS(df, paste0("/Users/benstenhaug/Google Drive/Stanford/Stanford Research/dtf_ell/data/", str_replace(file, "Rdata", "rds")))
+}
+
+main_frame <- main_frame %>% 
+  mutate(files = files %>% str_replace("\\.Rdata", ""),
+         data = paste0("~/Google Drive/Stanford/Stanford Research/dtf_ell/data/", files, ".rds") %>% map(read_rds) %>% map(as_data_frame),
+         year = files %>% str_extract("\\d+") %>% as.numeric())
+
+# filter out 2002 because its funky
+main_frame <- main_frame %>% 
+  filter(year > 2002)
+```
+
+# Now we have main_frame which holds all of our data files
+
+```{r}
+# check it out
+main_frame %>% print(n = 75)
+
+df <- main_frame$data[[2]]
+```
+
+# Correlation analysis
+
+```{r}
+# write a function to get correlation
+replace_0 <- function(x){x[x == 0] <- NA; x}
+
+get_correlation <- function(df){
+  df %>% 
+    mutate(score_mc = df %>% select(contains("mc_")) %>% rowSums(na.rm = TRUE),
+           score_cr = df %>% select(contains("cr_")) %>% rowSums(na.rm = TRUE),
+           score_total = score_mc + score_cr,
+           score_scale = as.numeric(Scale.Score)) %>% 
+    mutate_at(vars(contains("score_")), replace_0) %>% 
+    mutate(ell = In.ELL.Program.Continuously %>% recode(U = NA_integer_, Y = 1L, N = 0L)) %>% 
+    select(contains("score_"), ell, everything()) %>% 
+    filter(!is.na(ell)) %>% 
+    select(contains("score_")) %>% 
+    cor(use = "complete.obs")
+}
+
+# run on each
+main_frame <- main_frame %>% 
+  mutate(correlation = data %>% map(get_correlation))
+
+# graph it
+main_frame$correlation %>% 
+  map(~ .[lower.tri(., diag = FALSE)]) %>% 
+  do.call(rbind, .) %>% 
+  barplot(beside = TRUE)
+```
+
+# Effects
+
+```{r}
+# write a function to get effects
+eff_size<-function(df) {
+    # data cleaning
+    df <- df %>% 
+      mutate(ell = In.ELL.Program.Continuously %>% recode(U = NA_character_, Y = "yes", N = "no")) %>% 
+      filter(!is.na(ell))
+    
+    resp <- df %>%
+      select(contains("mc_"), contains("cr_"))
+    
+    resp <- resp %>% 
+      select(which(map_dbl(resp, ~ mean(is.na(.))) < 0.1)) %>% 
+      na.omit() %>% 
+      as_data_frame()
+    
+    index <- sample(1:nrow(resp), 10000)
+    resp <- resp[index, ]
+    ell <- df$ell[index]
+
+    # begin functions
+    mc <- resp %>% select(contains("mc_")) %>% as.data.frame()
+    base <- c("free_means","free_var")
+    tech <- list(NCYCLES = 5000)
+    
+    fun <- function(m1) {
+        e.prior <- coef(m1)$yes$GroupPars[1] - coef(m1)$no$GroupPars[1]
+        s.prior <- sqrt(coef(m1)$no$GroupPars[2])
+        e.prior/s.prior
+    }
+    
+    # just mc/rasch
+    models <- paste('F1 = 1-',ncol(mc)-1,sep="")
+    
+    m1 <- multipleGroup(TOL = .00005, technical = tech, mc, group = ell, method = "EM", itemtype = "Rasch", models, invariance = c(base,"slopes","intercepts"), verbose = FALSE)
+    e1 <- fun(m1)
+    
+    # mc/3pl
+    m2 <- multipleGroup(TOL = .00005, technical = tech, mc, group = ell, method = "EM", itemtype = "3PL", models, invariance = c(base,"slopes","intercepts"), verbose = FALSE)
+    e2 <- fun(m2)
+    
+    # all/rasch
+    models <- paste('F1 = 1-',ncol(resp)-1,sep="")
+    m3 <- multipleGroup(TOL = .00005, technical = tech, resp, group = ell, method = "EM", itemtype = "Rasch", models, invariance = c(base,"slopes","intercepts"), verbose=FALSE)
+    e3 <- fun(m3)
+    
+    # all/3pl
+    tab <- apply(resp, 2, max)
+    it <- ifelse(tab == 1,"3PL", "gpcm")
+    m4 <- multipleGroup( TOL = .00005, technical = tech, resp, group = ell, method = "EM", itemtype = it, models, invariance = c(base,"slopes","intercepts"), verbose=FALSE)
+    e4 <- fun(m4)
+    
+    ## return
+    c(e1,e2,e3,e4)
+}
+
+# apply to dataset
+main_frame <- main_frame %>% 
+  mutate(effects = data %>% map(eff_size))
+```
+
+# ELL Plots
+
+```{r}
+# get one dataframe to play with: df <- main_frame$data[[1]]
+
+# make some functions
+get_percent_no_missing <- function(df){
+  full <- nrow(df)
+  
+  reduced <- df %>% 
+    select(contains("mc_"), contains("cr_")) %>% 
+    na.omit() %>% 
+    nrow()
+  
+  reduced / full
+}
+
+get_range_means_Scale.Score_by_Language.Background <- function(df){
+  tmp <- df %>% 
+    select(Scale.Score, Language.Background) %>% 
+    mutate(Scale.Score = ifelse(Scale.Score == 0, NA, Scale.Score)) %>% 
+    group_by(Language.Background) %>% 
+    summarize(Scale.Score.Mean = mean(Scale.Score, na.rm = TRUE)) %>% 
+    filter(!is.na(Language.Background))
+  
+  max(tmp$Scale.Score.Mean) - min(tmp$Scale.Score.Mean)
+}
+
+get_percent_diff_FreeLunch_by_ELL <- function(df){
+  tmp <- df %>% 
+  mutate(ell = In.ELL.Program.Continuously %>% recode(U = NA_character_, Y = "yes", N = "no")) %>% 
+  select(Free.Reduced.lunch.Status, ell) %>% 
+  filter(!is.na(ell)) %>% 
+  count(Free.Reduced.lunch.Status, ell) %>% 
+  group_by(ell) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  ungroup() %>% 
+  filter(Free.Reduced.lunch.Status == "F") %>% 
+  arrange(ell)
+
+  tmp$percent[2] - tmp$percent[1] %>% round(2)
+}
+
+get_ell_pts_per_q <- function(df){
+  tmp <- df %>% 
+  mutate(ell = In.ELL.Program.Continuously %>% recode(U = NA_character_, Y = "yes", N = "no")) %>% 
+  select(ell, contains("mc_"), contains("cr_")) %>% 
+  na.omit()
+
+  percent_ell <- mean(tmp$ell == "yes")
+  
+  mc_pts_per_q <- tmp %>% 
+    select(contains("mc_")) %>% 
+    apply(1, mean) %>% 
+    mean()
+  
+  tmp_cr <- tmp %>% 
+    select(contains("cr_"))
+  
+  cr_pts_per_q <- mean(apply(tmp_cr, 1, sum) / ncol(tmp_cr))
+  
+  c(percent_ell, mc_pts_per_q, cr_pts_per_q)
+}
+
+# apply those functions
+(main_frame_simp <- main_frame %>% 
+  slice(1:nrow(main_frame)) %>% 
+  mutate(students = data %>% map_dbl(nrow),
+         mc_count = data %>% map_dbl(~ names(.) %>% str_detect("mc_") %>% sum()),
+         cr_count = data %>% map_dbl(~ names(.) %>% str_detect("cr_") %>% sum()),
+         percent_no_missing = data %>% map_dbl(get_percent_no_missing),
+         range_means_Scale.Score_by_Language.Background = data %>% map_dbl(get_range_means_Scale.Score_by_Language.Background),
+         percent_diff_FreeLunch_by_ELL = data %>% map_dbl(get_percent_diff_FreeLunch_by_ELL),
+         ell_pts_per_q = data %>% map(get_ell_pts_per_q)) %>% 
+  select(files, data, year:ell_pts_per_q, correlation, effects))
+
+
+# take results and graph them
+main_frame_simp %>% 
+  count(mc_count, cr_count) %>% 
+  ggplot() +
+  geom_text(aes(x = mc_count, y = cr_count, label = n)) +
+  scale_y_continuous(limits = c(13, 15), breaks = 13:15) +
+  labs(title = "30 tests with 45 mc questions and 14 cr questions etc...")
+
+ggsave("0.png")
+
+main_frame_simp %>% 
+  ggplot() +
+  geom_point(aes(x = year, y = percent_no_missing))
+
+ggsave("1.png")
+
+main_frame_simp %>% 
+  ggplot() +
+  geom_point(aes(x = year, y = range_means_Scale.Score_by_Language.Background))
+
+ggsave("2.png")
+
+main_frame_simp %>% 
+  ggplot() +
+  geom_point(aes(x = percent_diff_FreeLunch_by_ELL, range_means_Scale.Score_by_Language.Background))
+
+ggsave("3.png")
+
+main_frame_simp %>% 
+  select(year, ell_pts_per_q) %>% 
+  mutate(percent_ell = ell_pts_per_q %>% map_dbl(1),
+         mc_pts = ell_pts_per_q %>% map_dbl(2),
+         cr_pts = ell_pts_per_q %>% map_dbl(3)) %>% 
+  ggplot() +
+  geom_point(aes(x = mc_pts, y = cr_pts, color = percent_ell > 0.01, shape = as.factor(year)))
+
+ggsave("4.png")
+```
+
+# Save main frame
+
+```{r}
+main_frame %>% write_rds("main_frame.rds")
+```
+
