@@ -59,4 +59,9 @@ out<-list()
 for (i in 1:length(lf)) eff.size(lf[i])->out[[lf[i] ]]
 
 do.call("rbind",out)->tab
+save(tab,file="/home/bd/Dropbox/projects/psychometrics/ell_dtf/wd/naive.Rdata")
+
+data.frame(tab)->tab
+names(tab)<-c("rd","td","rm","tm")
+plot(tab)
 
