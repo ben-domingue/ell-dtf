@@ -1,5 +1,3 @@
-##not yet ready
-
 set.seed(10123010)
 fun<-function(x) {
     x[,1]->gr
@@ -24,11 +22,12 @@ fun<-function(x) {
     rstan_options(auto_write = TRUE)
     options(mc.cores = parallel::detectCores())
                                         #
-    fit <- stan(file='/home/bd/Dropbox/projects/colombia/community_colleges/src/anchor/irt-ml.stan',data=L,iter=4000,chains=5)
+    fit <- stan(file='irt_ml.stan',data=L,iter=1000,chains=1) #you need to be in right working directory
     ##save(fit,file=paste("colfit-",nm,".Rdata",sep=""))
+    fit
 }
 
-load(file="dat_y2004_g04_s1.Rdata")
+load(file="/home/bd/Dropbox/projects/psychometrics/ell_dtf/pub/dat_y2004_g7_s1.Rdata") ##will need to modify for local machine
 ifelse(df$In.ELL.Program.Continuously=="U",NA,df$In.ELL.Program.Continuously)->df$ell
 ifelse(df$ell=="Y",2,1)->df$ell
 df[!is.na(df$ell),]->df
@@ -41,48 +40,12 @@ for (i in 2:ncol(mc)) {
 }
 mc[,c(TRUE,per<.05)]->mc
 mc[rowSums(is.na(mc))==0,]->mc
-sample(1:nrow(mc),5000)->index
+sample(1:nrow(mc),2000)->index
 mc[index,]->mc
-fun(mc)
+fun(mc)->fit
 
 
 
-
-
-est.fun<-function(resp,anchor
-                  ) {
-    co<-function(co) {
-        co[-length(co)]->co
-        do.call("rbind",co)->co
-        co[,1:3]
-    }
-    base<-c("free_means","free_var")
-    rowSums(is.na(resp))==0 -> index
-    resp[index,]->resp
-    ifelse(resp[,1]==2,"T","P")->gr
-    models <- paste('F1 = 1-',ncol(resp)-1,sep="")
-    library(mirt)
-    list(NCYCLES=2000)->tech
-    multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,"slopes","intercepts"),verbose=FALSE)->m1
-    #cbind(co(coef(m1)$P),co(coef(m1)$T))->tt
-    #dump("tt","")#print(tt)
-    multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,anchor),verbose=FALSE)->m2
-    #cbind(co(coef(m2)$P),co(coef(m2)$T))->tt
-    #dump("tt","")#print(tt)
-    #tcc(co(coef(m1)$P))->sc
-    list(m1=m1,m2=m2)
-}    
-
-
-
-## for (nm in c("QR_String","CR_String")) {
-##     load(paste("/home/domingue/colombia/community_colleges/",nm,".Rdata",sep=""))
-##     rowSums(is.na(tmp))==0->test
-##     tmp[test,]->tmp
-##     sample(1:nrow(tmp),10000)->index
-##     tmp[index,]->x
-##     fun(x,nm)
-## }
 
 
 
@@ -106,14 +69,7 @@ anch<-function(fit) {
     for (i in 1:ncol(ci1)) overlap(ci1[,i],ci2[,i])->anchor[i]
     anchor
 }
-compare<-function(b1,b2) {
-    mean(b1)->m1
-    mean(b2)->m2
-    sd(b1)->s1
-    sd(b2)->s2
-    abs(m1-m2)/sqrt(s1^2+s2^2)
-}
-
+anch(fit)->anchor
 
 
 
@@ -148,35 +104,46 @@ pf<-function(fit,plot=FALSE) {
     }
     data.frame(cbind(b1,b2,anchor,comp))
 }
+pf(fit,plot=TRUE)
 
 
-library(rstan)
-anch.out<-list()
-plot<-TRUE
-if (plot) {
-    pdf("/tmp/fig.pdf",width=7,height=7)
-    par(mfrow=c(1,2),mgp=c(2,1,0),mar=c(3,3,2,2))
-}
-for (nm in c("QR_String","CR_String")) {
-    load(paste("colfit-",nm,".Rdata",sep=""))
-    pf(fit,plot=plot)->anch.out[[nm]]
-    if (plot) mtext(side=3,line=0.2,gsub("_String","",nm))
-}
-if (plot) legend("bottomright",c("anchor","variant"),lty=c(1),lwd=2,col=c("black","red"),bty="n")
-dev.off()
+est.fun<-function(resp,anchor
+                  ) {
+    co<-function(co) {
+        co[-length(co)]->co
+        do.call("rbind",co)->co
+        co[,1:3]
+    }
+    base<-c("free_means","free_var")
+    rowSums(is.na(resp))==0 -> index
+    resp[index,]->resp
+    ifelse(resp[,1]==2,"e","n")->gr
+    models <- paste('F1 = 1-',ncol(resp)-1,sep="")
+    library(mirt)
+    list(NCYCLES=2000)->tech
+    multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,"slopes","intercepts"),verbose=FALSE)->m1
+    #cbind(co(coef(m1)$P),co(coef(m1)$T))->tt
+    #dump("tt","")#print(tt)
+    multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,anchor),verbose=FALSE)->m2
+    #cbind(co(coef(m2)$P),co(coef(m2)$T))->tt
+    #dump("tt","")#print(tt)
+    #tcc(co(coef(m1)$P))->sc
+    list(m1=m1,m2=m2)
+}    
+names(mc)[-1][anchor]->anchor.names
+est.fun(mc,anchor.names)->out
 
-f<-function(nm,out) {
-    L<-list()
-                                        #
-    out[[nm]]->x
-    which.min(x$comp)->i
-    paste(nm,i,sep="")->L$one
-    paste(nm,which(x$anchor==1),sep="")->L$anch
-    order(x$comp)->index
-    paste(nm,index,sep="")->L$all
-    L
+fun<-function(l) {
+    l$m1->m1
+    l$m2->m2
+    coef(m1)$n$GroupPars[1]-coef(m1)$e$GroupPars[1]->e.prior
+    sqrt(coef(m1)$n$GroupPars[2])->s.prior
+    coef(m2)$n$GroupPars[1]-coef(m2)$e$GroupPars[1]->e.post
+    sqrt(coef(m2)$n$GroupPars[2])->s.post
+    c(coef(m1)$n$GroupPars,coef(m1)$e$GroupPars,coef(m2)$n$GroupPars,coef(m2)$e$GroupPars)->zz
+    write.table(zz,"")
+    c(e.prior/s.prior,e.post/s.post)
 }
-lapply(names(anch.out),f,anch.out)->anchor
-names(anch.out)->names(anchor)
-    
-save(anchor,file="anchor-stan.Rdata")
+fun(out)
+
+
