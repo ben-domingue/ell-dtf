@@ -1,5 +1,6 @@
 set.seed(10123010)
-fun<-function(x) {
+
+stan.fit<-function(x) {#note that you need to check that irt_ml.stan is in the current working directory
     x[,1]->gr
     x[,-1]->resp
     J<-nrow(resp)
@@ -17,12 +18,14 @@ fun<-function(x) {
     do.call("c",kk)->kk
     #
     L<-list(J=J,K=K,N=length(y),jj=jj,kk=kk,y=y,g=gr)
-                                        #
+    ##
     library(rstan)
     rstan_options(auto_write = TRUE)
     options(mc.cores = parallel::detectCores())
-                                        #
-    fit <- stan(file='irt_ml.stan',data=L,iter=1000,chains=1) #you need to be in right working directory
+    ##
+    ##you need to be in right working directory
+    ##
+    fit <- stan(file='irt_ml.stan',data=L,iter=1000,chains=3)  #i am tuning the iter and chains downwards for the sake of time, but we should use defaults of stan in the long run
     ##save(fit,file=paste("colfit-",nm,".Rdata",sep=""))
     fit
 }
@@ -32,7 +35,7 @@ ifelse(df$In.ELL.Program.Continuously=="U",NA,df$In.ELL.Program.Continuously)->d
 ifelse(df$ell=="Y",2,1)->df$ell
 df[!is.na(df$ell),]->df
 grep("^mc",names(df))->index
-df[,c("ell",names(df)[index])]->mc
+df[,c("ell",names(df)[index])]->mc #note the first column tells us which group you are in
 
 per<-numeric()
 for (i in 2:ncol(mc)) {
@@ -40,16 +43,12 @@ for (i in 2:ncol(mc)) {
 }
 mc[,c(TRUE,per<.05)]->mc
 mc[rowSums(is.na(mc))==0,]->mc
-sample(1:nrow(mc),2000)->index
+sample(1:nrow(mc),10000)->index ##this is a fairly small sample. we may need to run it on a bigger sample 
 mc[index,]->mc
-fun(mc)->fit
+stan.fit(mc)->fit #we now have a fitted stan object. this contains all the posterior samples amongst other things. 
 
 
-
-
-
-
-anch<-function(fit) {
+anch<-function(fit) { #this just asks whether we have overlapping 95% credible regions from the posterior. 
     extract(fit)$beta->B
     colMeans(B[,,1])->b1
     colMeans(B[,,2])->b2
@@ -69,7 +68,7 @@ anch<-function(fit) {
     for (i in 1:ncol(ci1)) overlap(ci1[,i],ci2[,i])->anchor[i]
     anchor
 }
-anch(fit)->anchor
+anch(fit)->anchor #not esp opaque what has happened; will be clear when we look at pf()
 
 
 
@@ -105,9 +104,10 @@ pf<-function(fit,plot=FALSE) {
     data.frame(cbind(b1,b2,anchor,comp))
 }
 pf(fit,plot=TRUE)
+##ok, so the anchor items are the black ones. these are where the credible regions for the difficulties overlap
+##one problem: if we use the full sample for any data (e.g., >50k students), we would probably get such tight credible regions that no anchor items are identified
 
-
-est.fun<-function(resp,anchor
+est.fun<-function(resp,anchor #now we're going to estimate the multigroup rasch model where i fix all slopes & intercepts (m1, this is basically the 'business as usual' approach) and then where just those for the anchors vary (m2). 
                   ) {
     co<-function(co) {
         co[-length(co)]->co
@@ -122,18 +122,14 @@ est.fun<-function(resp,anchor
     library(mirt)
     list(NCYCLES=2000)->tech
     multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,"slopes","intercepts"),verbose=FALSE)->m1
-    #cbind(co(coef(m1)$P),co(coef(m1)$T))->tt
-    #dump("tt","")#print(tt)
     multipleGroup(TOL=.00005,technical=tech,resp[,-1],group=gr,method="EM",itemtype="Rasch",models,invariance=c(base,anchor),verbose=FALSE)->m2
-    #cbind(co(coef(m2)$P),co(coef(m2)$T))->tt
-    #dump("tt","")#print(tt)
-    #tcc(co(coef(m1)$P))->sc
     list(m1=m1,m2=m2)
 }    
 names(mc)[-1][anchor]->anchor.names
 est.fun(mc,anchor.names)->out
 
-fun<-function(l) {
+effsize<-function(l) { #here we are going to get the effect sizes before and after dtf adjustment (m1 and m2 above) that were one of the focal points of the aera open colombia paper.
+    ##note, this function is sensitive to what we call the groups (n and e). see est.fun()
     l$m1->m1
     l$m2->m2
     coef(m1)$n$GroupPars[1]-coef(m1)$e$GroupPars[1]->e.prior
@@ -144,6 +140,6 @@ fun<-function(l) {
     write.table(zz,"")
     c(e.prior/s.prior,e.post/s.post)
 }
-fun(out)
+effsize(out)
 
 
