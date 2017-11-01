@@ -73,6 +73,13 @@ anch(fit)->anchor #not esp opaque what has happened; will be clear when we look 
 
 
 pf<-function(fit,plot=FALSE) {
+    compare<-function(b1,b2) {
+        mean(b1)->m1
+        mean(b2)->m2
+        sd(b1)->s1
+        sd(b2)->s2
+        abs(m1-m2)/sqrt(s1^2+s2^2)
+    }
     extract(fit)$beta->B
     colMeans(B[,,1])->b1
     colMeans(B[,,2])->b2
