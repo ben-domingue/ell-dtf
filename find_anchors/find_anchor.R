@@ -43,7 +43,7 @@ for (i in 2:ncol(mc)) {
 }
 mc[,c(TRUE,per<.05)]->mc
 mc[rowSums(is.na(mc))==0,]->mc
-sample(1:nrow(mc),10000)->index ##this is a fairly small sample. we may need to run it on a bigger sample 
+sample(1:nrow(mc),1000)->index ##this is a fairly small sample. we may need to run it on a bigger sample 
 mc[index,]->mc
 stan.fit(mc)->fit #we now have a fitted stan object. this contains all the posterior samples amongst other things. 
 
